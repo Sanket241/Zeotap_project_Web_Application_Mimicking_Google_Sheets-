@@ -3,105 +3,152 @@ import { createSlice } from '@reduxjs/toolkit';
 const initialState = {
   cells: {},
   rows: 100,
-  columns: 26, // A to Z
+  columns: 26,
   selectedRange: null,
-  copiedRange: null,
   undoStack: [],
   redoStack: [],
+  findReplaceState: {
+    findText: '',
+    replaceText: '',
+    matchCase: false,
+    matchWholeCell: false,
+  },
 };
 
 const spreadsheetSlice = createSlice({
   name: 'spreadsheet',
   initialState,
   reducers: {
-    updateCell(state, action) {
+    updateCell: (state, action) => {
       const { id, cell } = action.payload;
-      state.cells[id] = { ...state.cells[id], ...cell };
+      state.cells[id] = {
+        ...state.cells[id],
+        ...cell,
+      };
     },
-    setSelectedRange(state, action) {
+    updateCellBatch: (state, action) => {
+      const { updates } = action.payload;
+      updates.forEach(({ id, cell }) => {
+        state.cells[id] = {
+          ...state.cells[id],
+          ...cell,
+        };
+      });
+    },
+    setSelectedRange: (state, action) => {
       state.selectedRange = action.payload;
     },
-    setCopiedRange(state, action) {
-      state.copiedRange = action.payload;
-    },
-    addRow(state) {
+    addRow: (state) => {
       state.rows += 1;
     },
-    addColumn(state) {
+    deleteRow: (state, action) => {
+      const { rowIndex } = action.payload;
+      // Remove cells in the row
+      Object.keys(state.cells).forEach(key => {
+        const [col, row] = key.split(':').map(Number);
+        if (row === rowIndex) {
+          delete state.cells[key];
+        } else if (row > rowIndex) {
+          // Move cells up
+          const newKey = `${col}:${row - 1}`;
+          state.cells[newKey] = state.cells[key];
+          delete state.cells[key];
+        }
+      });
+      state.rows -= 1;
+    },
+    addColumn: (state) => {
       state.columns += 1;
     },
-    deleteRow(state, action) {
-      if (state.rows > 1) {
-        state.rows -= 1;
-        // Clean up cells in the deleted row
-        Object.keys(state.cells).forEach(key => {
-          const [col, row] = key.split(':').map(Number);
-          if (row === action.payload) {
-            delete state.cells[key];
-          }
-        });
-      }
+    deleteColumn: (state, action) => {
+      const { colIndex } = action.payload;
+      // Remove cells in the column
+      Object.keys(state.cells).forEach(key => {
+        const [col, row] = key.split(':').map(Number);
+        if (col === colIndex) {
+          delete state.cells[key];
+        } else if (col > colIndex) {
+          // Move cells left
+          const newKey = `${col - 1}:${row}`;
+          state.cells[newKey] = state.cells[key];
+          delete state.cells[key];
+        }
+      });
+      state.columns -= 1;
     },
-    deleteColumn(state, action) {
-      if (state.columns > 1) {
-        state.columns -= 1;
-        // Clean up cells in the deleted column
-        Object.keys(state.cells).forEach(key => {
-          const [col, row] = key.split(':').map(Number);
-          if (col === action.payload) {
-            delete state.cells[key];
-          }
-        });
-      }
-    },
-    pushUndo(state) {
-      state.undoStack.push(JSON.parse(JSON.stringify({
-        cells: state.cells,
-        rows: state.rows,
-        columns: state.columns,
-      })));
+    pushUndo: (state) => {
+      state.undoStack.push(JSON.stringify(state.cells));
       state.redoStack = [];
     },
-    undo(state) {
+    undo: (state) => {
       if (state.undoStack.length > 0) {
-        const previousState = state.undoStack.pop();
-        state.redoStack.push(JSON.parse(JSON.stringify({
-          cells: state.cells,
-          rows: state.rows,
-          columns: state.columns,
-        })));
-        state.cells = previousState.cells;
-        state.rows = previousState.rows;
-        state.columns = previousState.columns;
+        const prevState = state.undoStack.pop();
+        state.redoStack.push(JSON.stringify(state.cells));
+        state.cells = JSON.parse(prevState);
       }
     },
-    redo(state) {
+    redo: (state) => {
       if (state.redoStack.length > 0) {
         const nextState = state.redoStack.pop();
-        state.undoStack.push(JSON.parse(JSON.stringify({
-          cells: state.cells,
-          rows: state.rows,
-          columns: state.columns,
-        })));
-        state.cells = nextState.cells;
-        state.rows = nextState.rows;
-        state.columns = nextState.columns;
+        state.undoStack.push(JSON.stringify(state.cells));
+        state.cells = JSON.parse(nextState);
       }
+    },
+    setFindReplaceState: (state, action) => {
+      state.findReplaceState = {
+        ...state.findReplaceState,
+        ...action.payload,
+      };
+    },
+    findAndReplace: (state, action) => {
+      const { findText, replaceText, matchCase, matchWholeCell } = state.findReplaceState;
+      
+      Object.entries(state.cells).forEach(([id, cell]) => {
+        const value = cell.value?.toString() || '';
+        let shouldReplace = false;
+        
+        if (matchWholeCell) {
+          shouldReplace = matchCase
+            ? value === findText
+            : value.toLowerCase() === findText.toLowerCase();
+        } else {
+          shouldReplace = matchCase
+            ? value.includes(findText)
+            : value.toLowerCase().includes(findText.toLowerCase());
+        }
+        
+        if (shouldReplace) {
+          const newValue = matchWholeCell
+            ? replaceText
+            : value.replace(
+                new RegExp(findText, matchCase ? 'g' : 'gi'),
+                replaceText
+              );
+          
+          state.cells[id] = {
+            ...cell,
+            value: newValue,
+            computedValue: newValue,
+          };
+        }
+      });
     },
   },
 });
 
 export const {
   updateCell,
+  updateCellBatch,
   setSelectedRange,
-  setCopiedRange,
   addRow,
-  addColumn,
   deleteRow,
+  addColumn,
   deleteColumn,
   pushUndo,
   undo,
   redo,
+  setFindReplaceState,
+  findAndReplace,
 } = spreadsheetSlice.actions;
 
 export default spreadsheetSlice.reducer;

@@ -49,17 +49,48 @@ const Spreadsheet = () => {
             computedValue: value?.toString().startsWith('=')
               ? evaluateFormula(value, {
                   getCellValue: (ref) => cells[ref]?.computedValue,
-                  getCurrentCell: () => cellIdToReference(cellId),
+                  getCellRange: (start, end) => {
+                    const values = [];
+                    for (let row = start.row; row <= end.row; row++) {
+                      for (let col = start.col; col <= end.col; col++) {
+                        const ref = `${col}:${row}`;
+                        values.push(cells[ref]?.computedValue);
+                      }
+                    }
+                    return values;
+                  },
                 })
               : value,
           },
         }));
         return true;
       },
+      cellStyle: (params) => {
+        const cellId = `${i}:${params.node.rowIndex}`;
+        const cell = cells[cellId];
+        const format = cell?.format || {};
+        
+        return {
+          fontWeight: format.bold ? 'bold' : 'normal',
+          fontStyle: format.italic ? 'italic' : 'normal',
+          fontSize: format.fontSize ? `${format.fontSize}px` : '14px',
+          color: format.color || '#000000',
+        };
+      },
+      cellRenderer: (params) => {
+        const cellId = `${i}:${params.node.rowIndex}`;
+        const cell = cells[cellId];
+        const value = cell?.computedValue ?? '';
+        
+        if (cell?.formula) {
+          return `<div title="${cell.formula}">${value}</div>`;
+        }
+        return value;
+      },
     }));
 
     return [headerCol, ...dataCols];
-  }, [columns, cells, dispatch]);
+  }, [cells, columns, dispatch]);
 
   const rowData = useMemo(() => {
     return Array.from({ length: rows }, (_, i) => ({
@@ -67,52 +98,55 @@ const Spreadsheet = () => {
     }));
   }, [rows]);
 
-  const defaultColDef = useMemo(() => ({
-    sortable: false,
+  const defaultColDef = {
     resizable: true,
-  }), []);
+    sortable: false,
+    filter: false,
+  };
 
-  const onCellClicked = useCallback((event) => {
-    if (event.column.colId === 'rowHeader') return;
+  const onCellClicked = (params) => {
+    if (params.column.colId === 'rowHeader') return;
     
-    const colIndex = parseInt(event.column.colId.replace('col', ''));
-    const range = {
-      start: { row: event.rowIndex, col: colIndex },
-      end: { row: event.rowIndex, col: colIndex },
-    };
-    dispatch(setSelectedRange(range));
-  }, [dispatch]);
-
-  const onRangeSelectionChanged = useCallback((event) => {
-    if (!event.finished) return;
-
-    const range = event.api.getCellRanges()?.[0];
-    if (!range) return;
-
+    const col = parseInt(params.column.colId.replace('col', ''));
+    const row = params.node.rowIndex;
+    
     dispatch(setSelectedRange({
-      start: {
-        row: range.startRow.rowIndex,
-        col: parseInt(range.columns[0].colId.replace('col', '')),
-      },
-      end: {
-        row: range.endRow.rowIndex,
-        col: parseInt(range.columns[range.columns.length - 1].colId.replace('col', '')),
-      },
+      start: { col, row },
+      end: { col, row },
     }));
-  }, [dispatch]);
+  };
+
+  const onRangeSelectionChanged = (params) => {
+    if (!params.finished) return;
+    
+    const ranges = params.api.getCellRanges();
+    if (!ranges || ranges.length === 0) return;
+    
+    const range = ranges[0];
+    if (!range.startColumn?.getColId()?.startsWith('col')) return;
+    
+    const startCol = parseInt(range.startColumn.getColId().replace('col', ''));
+    const endCol = parseInt(range.endColumn.getColId().replace('col', ''));
+    
+    dispatch(setSelectedRange({
+      start: { col: startCol, row: range.startRow.rowIndex },
+      end: { col: endCol, row: range.endRow.rowIndex },
+    }));
+  };
 
   return (
-    <div className="ag-theme-alpine" style={{ width: '100%', height: '100%' }}>
+    <div className="ag-theme-alpine" style={{ height: 'calc(100vh - 48px)', width: '100%' }}>
       <AgGridReact
         columnDefs={createColumnDefs()}
         rowData={rowData}
         defaultColDef={defaultColDef}
         rowHeight={25}
-        headerHeight={25}
+        headerHeight={32}
         onCellClicked={onCellClicked}
-        onRangeSelectionChanged={onRangeSelectionChanged}
         enableRangeSelection={true}
-        suppressMovableColumns={true}
+        onRangeSelectionChanged={onRangeSelectionChanged}
+        suppressCopyRowsToClipboard={true}
+        enableFillHandle={true}
       />
     </div>
   );
